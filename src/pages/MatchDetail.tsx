@@ -1,27 +1,67 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router-dom";
-import {
-  fetchMatchLeaderboard,
-  fetchMatches,
-  fetchMatchesbyid,
-  fetchScorecard,
-} from "../api/matchesApi";
-import type {
-  ApiMatch,
-  MatchLeaderboardEntry,
-  ScorecardApiResponse,
-  ScorecardInnings,
-} from "../types/api";
+import type { ApiMatch, ScorecardInnings } from "../types/api";
 import TeamPreview from "./TeamPreview";
 import { apiUrl } from "../api/client";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  useMatches,
+  useMatch,
+  useScorecard,
+  useMatchLeaderboard,
+  useRefreshMatchData,
+} from "@/hooks/useQueries";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  ChevronLeft,
+  Eye,
+  AlertCircle,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronRight,
+} from "lucide-react";
 
 type DetailTab = "scorecard" | "leaderboard";
-type SortKey = "name" | "totalpoints";
-type SortDir = "asc" | "desc";
+
+/** Normalizes API start date (seconds or ms) to milliseconds since epoch. */
+function matchStartTimestampMs(startDate: number): number {
+  return String(startDate).length <= 10 ? startDate * 1000 : startDate;
+}
+
+const NOW_POLL_MS = 10_000;
+
+/** Cached instant — must not call Date.now() inside getSnapshot (new value every call → infinite re-renders). */
+let nowMsCache = Date.now();
+
+function subscribeNow(onStoreChange: () => void): () => void {
+  nowMsCache = Date.now();
+  const id = window.setInterval(() => {
+    nowMsCache = Date.now();
+    onStoreChange();
+  }, NOW_POLL_MS);
+  return () => window.clearInterval(id);
+}
+
+function getNowSnapshot(): number {
+  return nowMsCache;
+}
+
+function getServerNowSnapshot(): number {
+  return 0;
+}
 
 function formatWhen(startDate: number): string {
-  const ms = String(startDate).length <= 10 ? startDate * 1000 : startDate;
-  return new Date(ms).toLocaleString(undefined, {
+  return new Date(matchStartTimestampMs(startDate)).toLocaleString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -43,16 +83,12 @@ function base64ToBlobUrl(base64: string | null | undefined): string | null {
   }
 }
 
-/* ═══════════════════════════════════════════════
-   Parse scorecard API response
-   ═══════════════════════════════════════════════ */
-
 function parseInnings(raw: string | null | undefined): ScorecardInnings | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     return {
-      batting: (parsed.batting ?? []).map((b: any) => ({
+      batting: (parsed.batting ?? []).map((b: Record<string, unknown>) => ({
         name: b.name ?? "",
         dismissal: b.dismissal ?? "not out",
         runs: b.runs ?? 0,
@@ -61,7 +97,7 @@ function parseInnings(raw: string | null | undefined): ScorecardInnings | null {
         sixes: b.sixes ?? 0,
         sr: b.sr ?? 0,
       })),
-      bowling: (parsed.bowling ?? []).map((bw: any) => ({
+      bowling: (parsed.bowling ?? []).map((bw: Record<string, unknown>) => ({
         name: bw.name ?? "",
         overs: bw.overs ?? 0,
         maidens: bw.maidens ?? 0,
@@ -91,7 +127,6 @@ function parseInnings(raw: string | null | undefined): ScorecardInnings | null {
   }
 }
 
-/** Resolve team name from match data using team ID string from scorecard */
 function resolveTeamName(
   match: ApiMatch | null,
   teamIdStr: string | undefined,
@@ -106,317 +141,236 @@ function resolveTeamName(
   return fallback;
 }
 
-/* ═══════════════════════════════════════════════
-   Scorecard View Component
-   ═══════════════════════════════════════════════ */
-
+/* Scorecard View */
 function ScorecardView({
   innings,
-  teamName,
 }: {
   innings: ScorecardInnings;
-  teamName: string;
 }) {
   return (
-    <div className="sc-innings-body">
+    <div className="space-y-5">
       {/* Batting */}
-      <div className="sc-section">
-        <div className="sc-section-head">{teamName} — Batting</div>
-        <table className="sc-table">
-          <thead>
-            <tr>
-              <th className="sc-th-batter">Batter</th>
-              <th className="sc-th-num">R</th>
-              <th className="sc-th-num">B</th>
-              <th className="sc-th-num">4s</th>
-              <th className="sc-th-num">6s</th>
-              <th className="sc-th-num">S/R</th>
-            </tr>
-          </thead>
-          <tbody>
-            {innings.batting.map((b, i) => {
-              const isOut = b.dismissal !== "not out";
-              return (
-                <tr
-                  key={i}
-                  className={`sc-bat-row${!isOut ? " sc-bat-row--notout" : ""}`}
-                >
-                  <td className="sc-bat-cell">
-                    <div className="sc-avatar">{b.name.charAt(0)}</div>
-                    <div className="sc-bat-info">
-                      <span className="sc-bat-name">
-                        {b.name}
-                        {!isOut && (
-                          <span className="sc-notout-star" title="not out">
-                            ★
-                          </span>
-                        )}
-                      </span>
-                      <span className="sc-dismissal">{b.dismissal}</span>
-                    </div>
-                  </td>
-                  <td
-                    className={`sc-num${b.runs >= 50 ? " sc-num--fifty" : ""}${b.runs >= 100 ? " sc-num--century" : ""}`}
-                  >
-                    {b.runs}
-                  </td>
-                  <td className="sc-num">{b.balls}</td>
-                  <td className="sc-num">{b.fours}</td>
-                  <td className="sc-num">{b.sixes}</td>
-                  <td className="sc-num">{b.sr.toFixed(2)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div className="sc-extras-row">
-          <span className="sc-extras-label">Extras</span>
-          <span className="sc-extras-detail">
-            (w {innings.extras.wides}, nb {innings.extras.noBalls}, b{" "}
-            {innings.extras.byes}, lb {innings.extras.legByes})
-          </span>
-          <span className="sc-extras-val">{innings.extras.total}</span>
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="h-1 w-1 rounded-full bg-primary" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Batting
+          </h3>
         </div>
-        <div className="sc-total-row">
-          <span className="sc-total-label">Total</span>
-          <span className="sc-total-score">
-            {innings.total.runs}/{innings.total.wickets}
-          </span>
-          <span className="sc-total-overs">
-            ({innings.total.overs} Ov, RR: {innings.total.runRate.toFixed(2)})
-          </span>
+
+        {/* Header row */}
+        <div className="flex items-center gap-2 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+          <span className="flex-1">Batter</span>
+          <span className="w-9 text-right">R</span>
+          <span className="w-9 text-right">B</span>
+          <span className="w-9 text-right hidden sm:block">4s</span>
+          <span className="w-9 text-right hidden sm:block">6s</span>
+          <span className="w-11 text-right">SR</span>
+        </div>
+
+        <div className="space-y-1">
+          {innings.batting.map((b, i) => {
+            const isOut = b.dismissal !== "not out";
+            const isTopScore = b.runs >= 50;
+            return (
+              <div
+                key={i}
+                className={`flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors ${
+                  isTopScore ? 'bg-primary/5 border border-primary/10' : 'bg-muted/30 hover:bg-muted/50'
+                }`}
+              >
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <div className={`h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
+                    !isOut ? 'bg-primary/15 text-primary ring-1 ring-primary/30' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {b.name.charAt(0)}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-medium flex items-center gap-1 truncate">
+                      {b.name}
+                      {!isOut && <span className="text-[8px] font-bold text-primary bg-primary/10 px-1 rounded shrink-0">NOT OUT</span>}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground/70 truncate">{b.dismissal}</div>
+                  </div>
+                </div>
+                <span className={`w-9 text-right text-[13px] tabular-nums shrink-0 ${
+                  b.runs >= 100 ? 'font-extrabold text-primary' : b.runs >= 50 ? 'font-bold text-gold' : 'font-medium'
+                }`}>
+                  {b.runs}
+                </span>
+                <span className="w-9 text-right text-[13px] tabular-nums text-muted-foreground shrink-0">{b.balls}</span>
+                <span className="w-9 text-right text-[13px] tabular-nums hidden sm:block shrink-0">{b.fours}</span>
+                <span className="w-9 text-right text-[13px] tabular-nums hidden sm:block shrink-0">{b.sixes}</span>
+                <span className="w-11 text-right text-[11px] tabular-nums text-muted-foreground shrink-0">{b.sr.toFixed(1)}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Extras + Total */}
+        <div className="mt-3 space-y-2 px-3">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Extras</span>
+            <span className="tabular-nums">
+              {innings.extras.total}
+              <span className="ml-1 text-muted-foreground/60">
+                (w {innings.extras.wides}, nb {innings.extras.noBalls}, b {innings.extras.byes}, lb {innings.extras.legByes})
+              </span>
+            </span>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t">
+            <span className="text-sm font-semibold">Total</span>
+            <div className="flex items-center gap-2">
+              <span className="text-lg font-bold tabular-nums">
+                {innings.total.runs}<span className="text-muted-foreground font-normal">/{innings.total.wickets}</span>
+              </span>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {innings.total.overs} Ov · RR {innings.total.runRate.toFixed(2)}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Bowling */}
-      <div className="sc-section sc-section--bowl">
-        <div className="sc-section-head">Bowling</div>
-        <table className="sc-table">
-          <thead>
-            <tr>
-              <th className="sc-th-batter">Bowler</th>
-              <th className="sc-th-num">O</th>
-              <th className="sc-th-num">M</th>
-              <th className="sc-th-num">R</th>
-              <th className="sc-th-num">W</th>
-              <th className="sc-th-num">Econ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {innings.bowling.map((bw, i) => (
-              <tr
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="h-1 w-1 rounded-full bg-destructive" />
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Bowling
+          </h3>
+        </div>
+
+        <div className="flex items-center gap-2 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+          <span className="flex-1">Bowler</span>
+          <span className="w-9 text-right">O</span>
+          <span className="w-9 text-right hidden sm:block">M</span>
+          <span className="w-9 text-right">R</span>
+          <span className="w-9 text-right">W</span>
+          <span className="w-11 text-right">Econ</span>
+        </div>
+
+        <div className="space-y-1">
+          {innings.bowling.map((bw, i) => {
+            const isStarBowler = bw.wickets >= 3;
+            return (
+              <div
                 key={i}
-                className={`sc-bowl-row${bw.wickets >= 3 ? " sc-bowl-row--star" : ""}`}
+                className={`flex items-center gap-2 px-3 py-2.5 rounded-lg transition-colors ${
+                  isStarBowler ? 'bg-primary/5 border border-primary/10' : 'bg-muted/30 hover:bg-muted/50'
+                }`}
               >
-                <td className="sc-bat-cell">
-                  <div className="sc-avatar sc-avatar--bowl">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <div className={`h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${
+                    isStarBowler ? 'bg-primary/15 text-primary ring-1 ring-primary/30' : 'bg-muted text-muted-foreground'
+                  }`}>
                     {bw.name.charAt(0)}
                   </div>
-                  <div className="sc-bat-info">
-                    <span className="sc-bat-name">{bw.name}</span>
-                  </div>
-                </td>
-                <td className="sc-num">{bw.overs}</td>
-                <td className="sc-num">{bw.maidens}</td>
-                <td className="sc-num">{bw.runs}</td>
-                <td
-                  className={`sc-num${bw.wickets >= 3 ? " sc-num--fifty" : ""}`}
-                >
+                  <span className="text-[13px] font-medium truncate">{bw.name}</span>
+                </div>
+                <span className="w-9 text-right text-[13px] tabular-nums shrink-0">{bw.overs}</span>
+                <span className="w-9 text-right text-[13px] tabular-nums text-muted-foreground hidden sm:block shrink-0">{bw.maidens}</span>
+                <span className="w-9 text-right text-[13px] tabular-nums shrink-0">{bw.runs}</span>
+                <span className={`w-9 text-right text-[13px] tabular-nums font-semibold shrink-0 ${isStarBowler ? 'text-primary' : ''}`}>
                   {bw.wickets}
-                </td>
-                <td className="sc-num">{bw.economy.toFixed(1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+                <span className="w-11 text-right text-[11px] tabular-nums text-muted-foreground shrink-0">{bw.economy.toFixed(1)}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════
-   Main Match Detail Page
-   ═══════════════════════════════════════════════ */
+/* Collapsible innings section — both shown, each toggleable */
+function InningsSection({
+  innings,
+  teamName,
+  label,
+  defaultOpen = true,
+}: {
+  innings: ScorecardInnings;
+  teamName: string;
+  label: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-lg border overflow-hidden">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-4 py-3 bg-muted/40 hover:bg-muted/60 transition-colors cursor-pointer"
+        onClick={() => setOpen(!open)}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold">{teamName}</span>
+          <span className="text-xs text-muted-foreground">{label}</span>
+          <span className="text-sm font-bold tabular-nums">
+            {innings.total.runs}/{innings.total.wickets}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            ({innings.total.overs} Ov)
+          </span>
+        </div>
+        {open ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+      </button>
+      {open && (
+        <div className="p-4">
+          <ScorecardView innings={innings} />
+        </div>
+      )}
+    </div>
+  );
+}
 
+/* Main Match Detail Page */
 export function MatchDetail() {
   const { matchId: mid } = useParams<{ matchId: string }>();
   const matchId = Number(mid);
 
   const [previewDid, setPreviewDid] = useState<number | null>(null);
-  const [isTeamCreated, setIsTeamCreated] = useState(false);
-  const [myDreamId, setMyDreamId] = useState<number | null>(null);
-
-  const [rows, setRows] = useState<ApiMatch[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
   const [tab, setTab] = useState<DetailTab>("scorecard");
-  const [scInningsIdx, setScInningsIdx] = useState<0 | 1>(0);
-
-  /* Scorecard state */
-  const [scRaw, setScRaw] = useState<ScorecardApiResponse | null>(null);
-  const [scLoading, setScLoading] = useState(true);
-  const [scError, setScError] = useState<string | null>(null);
-
-  /* Leaderboard state */
-  const [lbRows, setLbRows] = useState<MatchLeaderboardEntry[]>([]);
-  const [lbLoading, setLbLoading] = useState(true);
-  const [lbError, setLbError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("totalpoints");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const refreshData = () => {
-    let cancelled = false;
+  // ── Queries ──
+  const { data: allMatches = [], isLoading: loading, error: matchesError } = useMatches();
+  const { data: matchData } = useMatch(matchId);
+  const { data: scRaw, isLoading: scLoading, error: scQueryError } = useScorecard(matchId);
+  const { data: lbRows = [], isLoading: lbLoading, error: lbQueryError } = useMatchLeaderboard(matchId);
+  const refreshData = useRefreshMatchData(matchId);
 
-    console.log("Refreshing data...");
+  const error = matchesError ? (matchesError instanceof Error ? matchesError.message : "Failed to load") : null;
+  const scError = scQueryError ? (scQueryError instanceof Error ? scQueryError.message : "Failed to load scorecard") : null;
+  const lbError = lbQueryError ? (lbQueryError instanceof Error ? lbQueryError.message : "Failed to load leaderboard") : null;
 
-    fetchScorecard(matchId)
-      .then((data) => {
-        if (!cancelled) setScRaw(data);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled)
-          setScError(
-            e instanceof Error ? e.message : "Failed to load scorecard",
-          );
-      })
-      .finally(() => {});
+  const isTeamCreated = matchData?.dreamTeam != null;
+  const myDreamId: number | null = matchData?.dreamTeam?.id ?? null;
 
-    fetchMatchLeaderboard(matchId)
-      .then((data) => {
-        if (!cancelled) setLbRows(data ?? []);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled)
-          setLbError(
-            e instanceof Error ? e.message : "Failed to load leaderboard",
-          );
-      })
-      .finally(() => {});
-  };
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    fetchMatches()
-      .then((data) => {
-        if (!cancelled) setRows(data);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled)
-          setError(e instanceof Error ? e.message : "Failed to load");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    fetchMatchesbyid(matchId)
-      .then((data) => {
-        if (cancelled) return;
-        if (data?.dreamTeam != null) {
-          setIsTeamCreated(true);
-          setMyDreamId(data.dreamTeam.id);
-        } else {
-          setIsTeamCreated(false);
-          setMyDreamId(null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setIsTeamCreated(false);
-      });
-
-    /* Fetch real scorecard */
-    setScLoading(true);
-    setScError(null);
-    fetchScorecard(matchId)
-      .then((data) => {
-        if (!cancelled) setScRaw(data);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled)
-          setScError(
-            e instanceof Error ? e.message : "Failed to load scorecard",
-          );
-      })
-      .finally(() => {
-        if (!cancelled) setScLoading(false);
-      });
-
-    setLbLoading(true);
-    setLbError(null);
-    fetchMatchLeaderboard(matchId)
-      .then((data) => {
-        if (!cancelled) setLbRows(data ?? []);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled)
-          setLbError(
-            e instanceof Error ? e.message : "Failed to load leaderboard",
-          );
-      })
-      .finally(() => {
-        if (!cancelled) setLbLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [matchId]);
-
+  // SSE for live refresh
   useEffect(() => {
     const es = new EventSource(apiUrl("/api/stream/notif/" + matchId));
-
-    es.addEventListener("open", () => {
-      console.log("SSE connection established");
-    });
-
-    es.addEventListener("refresh", (e) => {
-      console.log("Received refresh event:", e.data);
-      refreshData();
-    });
-
-    es.onmessage = (e) => {
-      console.log("Generic message:", e.data);
-    };
-
-    es.onerror = (e) => {
-      console.error("SSE error:", e);
-    };
-
-    // Cleanup: runs when component unmounts or dependencies change
-    return () => {
-      es.close();
-    };
-  }, []);
+    es.addEventListener("refresh", () => refreshData());
+    es.onerror = () => {};
+    return () => { es.close(); };
+  }, [matchId, refreshData]);
 
   const match = useMemo(
-    () => rows.find((m) => m.matchId === matchId) ?? null,
-    [rows, matchId],
+    () => allMatches.find((m: ApiMatch) => m.matchId === matchId) ?? null,
+    [allMatches, matchId],
   );
 
-  /* Parse scorecard innings */
   const innings1 = useMemo(() => parseInnings(scRaw?.innings1), [scRaw]);
   const innings2 = useMemo(() => parseInnings(scRaw?.innings2), [scRaw]);
 
-  /* Resolve team names for each innings using teamId from scorecard */
-  const team1Name = useMemo(
-    () => resolveTeamName(match, scRaw?.team1, "Team 1"),
-    [match, scRaw],
-  );
-  const team2Name = useMemo(
-    () => resolveTeamName(match, scRaw?.team2, "Team 2"),
-    [match, scRaw],
-  );
+  const team1Name = useMemo(() => resolveTeamName(match, scRaw?.team1, "Team 1"), [match, scRaw]);
+  const team2Name = useMemo(() => resolveTeamName(match, scRaw?.team2, "Team 2"), [match, scRaw]);
 
-  const activeInnings = scInningsIdx === 0 ? innings1 : innings2;
-  const activeTeamName = scInningsIdx === 0 ? team1Name : team2Name;
   const hasScorecard = innings1 != null || innings2 != null;
 
-  /* Determine match result */
   const matchResult = useMemo(() => {
     if (!match || match.state !== "Completed") return null;
     if (!innings1 || !innings2) return scRaw?.matchstatus ?? null;
@@ -427,455 +381,389 @@ export function MatchDetail() {
     return "Match tied";
   }, [innings1, innings2, team1Name, team2Name, scRaw]);
 
-  /* Leaderboard helpers */
   const filteredSortedLbRows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = q
-      ? lbRows.filter(
-          (r) =>
-            r.name.toLowerCase().includes(q) || String(r.did ?? "").includes(q),
-        )
+      ? lbRows.filter((r) => r.name.toLowerCase().includes(q) || String(r.did ?? "").includes(q))
       : lbRows;
     const copy = [...filtered];
-    copy.sort((a, b) => {
-      const dir = sortDir === "asc" ? 1 : -1;
-      if (sortKey === "totalpoints")
-        return (a.totalpoints - b.totalpoints) * dir;
-      return a[sortKey].localeCompare(b[sortKey]) * dir;
-    });
+    copy.sort((a, b) => b.totalpoints - a.totalpoints);
     return copy;
-  }, [lbRows, query, sortKey, sortDir]);
+  }, [lbRows, query]);
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredSortedLbRows.length / pageSize),
-  );
-  const start = (page - 1) * pageSize;
+  const totalPages = Math.max(1, Math.ceil(filteredSortedLbRows.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * pageSize;
   const pageRows = filteredSortedLbRows.slice(start, start + pageSize);
-
-  useEffect(() => {
-    setPage(1);
-  }, [query, sortKey, sortDir, pageSize, matchId]);
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-
-  const onSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDir(key === "totalpoints" ? "desc" : "asc");
-    }
-  };
-  const sortArrow = (key: SortKey) =>
-    sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "";
 
   const t1 = match?.team1?.teamSName ?? match?.team1?.teamName ?? "Team 1";
   const t2 = match?.team2?.teamSName ?? match?.team2?.teamName ?? "Team 2";
 
+  const now = useSyncExternalStore(subscribeNow, getNowSnapshot, getServerNowSnapshot);
+  // Create/Edit squad only when kickoff is under 24h away (and not after start).
+  const squadEditingLocked =
+    match != null &&
+    (() => {
+      const startMs = matchStartTimestampMs(match.startDate);
+      const windowStartMs = startMs - 24 * 60 * 60 * 1000;
+      return now <= windowStartMs || now >= startMs;
+    })();
+
   if (!Number.isFinite(matchId)) {
     return (
-      <div className="page">
-        <p>Invalid match.</p>
-        <Link to="/matches">Back to matches</Link>
+      <div className="container py-8">
+        <p className="text-muted-foreground">Invalid match.</p>
+        <Button asChild variant="outline" className="mt-4">
+          <Link to="/matches">Back to matches</Link>
+        </Button>
       </div>
     );
   }
-  console.log(match);
+
   return (
-    <div className="page match-detail-page">
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <Link to="/matches">Matches</Link>
-        <span aria-hidden> / </span>
-        <span>{match ? `${t1} vs ${t2}` : "Match"}</span>
+    <div className="container py-8">
+      {/* Breadcrumb */}
+      <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">
+        <Link to="/matches" className="hover:text-foreground transition-colors flex items-center gap-1 hover:no-underline">
+          <ChevronLeft className="h-4 w-4" />
+          Matches
+        </Link>
+        <span>/</span>
+        <span className="text-foreground">{match ? `${t1} vs ${t2}` : "Match"}</span>
       </nav>
 
-      {loading && <p className="muted">Loading match…</p>}
-      {error && (
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
-      )}
-      {!loading && !error && !match && (
-        <div className="match-detail-miss">
-          <p>Match not found.</p>
-          <Link to="/matches" className="btn btn-primary">
-            Back to matches
-          </Link>
-        </div>
-      )}
-
-      {previewDid != null && (
-        <div className="md-modal-backdrop">
-          <div
-            className="md-modal-shell"
-            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-          >
-            <TeamPreview
-              matchId={matchId}
-              dreamId={previewDid}
-              close={() => setPreviewDid(null)}
-            />
+      {loading && (
+        <div className="space-y-6">
+          <div className="rounded-xl border bg-card p-6 space-y-4">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-5 w-24" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-24 rounded-md" />
+            <Skeleton className="h-9 w-28 rounded-md" />
+          </div>
+          <div className="space-y-2">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-14 w-full rounded-lg" />
+            ))}
           </div>
         </div>
       )}
+
+      {error && (
+        <Card className="border-destructive/50">
+          <CardContent className="flex items-center gap-3 pt-6 text-destructive">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <span>{error}</span>
+          </CardContent>
+        </Card>
+      )}
+
+      {!loading && !error && !match && (
+        <div className="flex flex-col items-center py-20">
+          <p className="text-muted-foreground mb-4">Match not found</p>
+          <Button asChild>
+            <Link to="/matches">Back to matches</Link>
+          </Button>
+        </div>
+      )}
+
+      {/* Team preview sheet */}
+      <Sheet open={previewDid != null} onOpenChange={(open) => { if (!open) setPreviewDid(null) }}>
+        <SheetContent side="right" className="p-0 flex flex-col overflow-hidden sm:max-w-md">
+          <SheetTitle className="sr-only">Squad Preview</SheetTitle>
+          {previewDid != null && (
+            <TeamPreview matchId={matchId} dreamId={previewDid} />
+          )}
+        </SheetContent>
+      </Sheet>
+
 
       {!loading && match && (
         <>
-          <header className="match-detail-hero">
-            <div>
-              <p className="eyebrow">{match.seriesName ?? "Cricket"}</p>
-              <h1 className="match-detail-title">
-                <span className="match-detail-team">{t1}</span>
-                <span className="match-detail-vs">vs</span>
-                <span className="match-detail-team">{t2}</span>
-              </h1>
-              <p className="muted match-detail-meta">
-                {formatWhen(match.startDate)}
-                <br></br>
-                {match.venueInfo?.ground
-                  ? ` ·  ${match.venueInfo.ground.length > 30 ? match.venueInfo.ground.substring(0, 30) + "..." : match.venueInfo.ground}`
-                  : ""}
-                {match.venueInfo?.city ? ` · ${match.venueInfo.city}` : ""}
-              </p>
-              <p className="match-detail-status">
-                <span className="status-pill">
-                  {match.status ?? match.state ?? "—"}
-                </span>
-              </p>
-            </div>
-            <div className="match-detail-actions">
-              {isTeamCreated && myDreamId != null && (
-                <button
-                  type="button"
-                  className="btn btn-ghost match-detail-cta"
-                  onClick={() => setPreviewDid(myDreamId)}
-                >
-                  Preview My Team
-                </button>
-              )}
-
-              {match.state === "Upcoming" && (
-                <Link
-                  to={`/match/${match.matchId}/create/${isTeamCreated ? "edit" : "new"}`}
-                  className="btn btn-primary match-detail-cta"
-                >
-                  {isTeamCreated ? "Edit Dream team" : "Dream team"}
-                </Link>
-              )}
-            </div>
-          </header>
-
-          <div className="detail-tabs" role="tablist" aria-label="Match detail">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "scorecard"}
-              className={`detail-tab${tab === "scorecard" ? " detail-tab--on" : ""}`}
-              onClick={() => setTab("scorecard")}
-            >
-              Scorecard
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "leaderboard"}
-              className={`detail-tab${tab === "leaderboard" ? " detail-tab--on" : ""}`}
-              onClick={() => setTab("leaderboard")}
-            >
-              Leaderboard
-            </button>
-          </div>
-
-          {/* ══════ SCORECARD TAB ══════ */}
-          {tab === "scorecard" && (
-            <section
-              className="detail-panel"
-              role="tabpanel"
-              aria-label="Scorecard"
-            >
-              <h2 className="sr-only">Scorecard</h2>
-
-              {scLoading && <p className="muted">Loading scorecard…</p>}
-              {scError && (
-                <div className="alert alert-error" role="alert">
-                  {scError}
-                </div>
-              )}
-
-              {!scLoading && !scError && !hasScorecard && (
-                <div className="match-detail-miss">
-                  <p className="muted">
-                    Scorecard not available yet for this match.
+          {/* Hero */}
+          <Card className="mb-6 overflow-hidden">
+            <CardContent className="pt-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <Badge variant="secondary" className="mb-3">
+                    {match.seriesName ?? "Cricket"}
+                  </Badge>
+                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
+                    {t1} <span className="text-muted-foreground font-normal">vs</span> {t2}
+                  </h1>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {formatWhen(match.startDate)}
+                    {match.venueInfo?.ground ? ` · ${match.venueInfo.ground.length > 35 ? match.venueInfo.ground.substring(0, 35) + "..." : match.venueInfo.ground}` : ""}
+                    {match.venueInfo?.city ? ` · ${match.venueInfo.city}` : ""}
                   </p>
+                  <Badge
+                    variant={match.state === "Completed" ? "secondary" : "emerald"}
+                    className="mt-2"
+                  >
+                    {match.status ?? match.state ?? "—"}
+                  </Badge>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {isTeamCreated && myDreamId != null && (
+                    <Button variant="outline" onClick={() => setPreviewDid(myDreamId)}>
+                      View my squad
+                    </Button>
+                  )}
+                  {match.state === "Upcoming" &&
+                    (squadEditingLocked ? (
+                      <Button type="button" disabled>
+                        Sugar ah?
+                      </Button>
+                    ) : (
+                      <Button asChild>
+                        <Link
+                          to={`/matches/${match.matchId}/create/${isTeamCreated ? "edit" : "new"}`}
+                        >
+                          {isTeamCreated ? "Edit squad" : "Create squad"}
+                        </Link>
+                      </Button>
+                    ))}
+                </div>
+              </div>
+              {matchResult && (
+                <div className="mt-6 -mx-6 -mb-6 px-6 py-4 bg-linear-to-r from-primary/10 via-primary/15 to-primary/10 border-t border-primary/20 flex items-center justify-center gap-3">
+                  <span className="text-xl leading-none">🏆</span>
+                  <span className="font-bold text-primary text-base tracking-wide">{matchResult}</span>
                 </div>
               )}
+            </CardContent>
+          </Card>
 
+          {/* Tabs */}
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
+            <TabsList className="mb-4">
+              <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
+              <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
+            </TabsList>
+
+            {/* Scorecard */}
+            <TabsContent value="scorecard">
+              {scLoading && (
+                <div className="space-y-4">
+                  <Skeleton className="h-24 w-full rounded-lg" />
+                  <Skeleton className="h-10 w-48 rounded-lg" />
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-12 w-full rounded-lg" />
+                  ))}
+                </div>
+              )}
+              {scError && (
+                <Card className="border-destructive/50">
+                  <CardContent className="flex items-center gap-3 pt-6 text-destructive">
+                    <AlertCircle className="h-5 w-5" />
+                    {scError}
+                  </CardContent>
+                </Card>
+              )}
+              {!scLoading && !scError && !hasScorecard && (
+                <div className="flex flex-col items-center py-16 text-center">
+                  <p className="text-muted-foreground">Aree ruko ji..</p>
+                </div>
+              )}
               {!scLoading && !scError && hasScorecard && (
-                <>
-                  {/* Toss info */}
+                <div className="space-y-4">
                   {scRaw?.matchstatus && (
-                    <div className="sc-toss-bar">🪙 {scRaw.matchstatus}</div>
+                    <Badge variant="secondary" className="text-xs">
+                      {scRaw.matchstatus}
+                    </Badge>
                   )}
 
-                  {/* Score summary banner */}
-                  <div className="sc-banner">
-                    <div
-                      className={`sc-banner-team${innings1 && innings2 && innings1.total.runs >= innings2.total.runs ? " sc-banner-team--win" : ""}`}
-                    >
-                      <span className="sc-banner-name">{team1Name}</span>
-                      <span className="sc-banner-score">
-                        {innings1
-                          ? `${innings1.total.runs}/${innings1.total.wickets}`
-                          : "—"}
-                      </span>
-                      {innings1 && (
-                        <span className="sc-banner-ov">
-                          ({innings1.total.overs} Ov)
-                        </span>
-                      )}
-                    </div>
-                    <div className="sc-banner-mid">
-                      <span className="sc-banner-vs">VS</span>
-                    </div>
-                    <div
-                      className={`sc-banner-team${innings1 && innings2 && innings2.total.runs >= innings1.total.runs ? " sc-banner-team--win" : ""}`}
-                    >
-                      <span className="sc-banner-name">{team2Name}</span>
-                      <span className="sc-banner-score">
-                        {innings2
-                          ? `${innings2.total.runs}/${innings2.total.wickets}`
-                          : "—"}
-                      </span>
-                      {innings2 && (
-                        <span className="sc-banner-ov">
-                          ({innings2.total.overs} Ov)
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {matchResult && (
-                    <div className="sc-result">{matchResult}</div>
-                  )}
+                  {/* Score banner */}
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center justify-around gap-4">
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">{team1Name}</p>
+                          <p className={`text-2xl font-bold tabular-nums ${innings1 && innings2 && innings1.total.runs >= innings2.total.runs ? 'text-primary' : ''}`}>
+                            {innings1 ? `${innings1.total.runs}/${innings1.total.wickets}` : "—"}
+                          </p>
+                          {innings1 && <p className="text-xs text-muted-foreground">({innings1.total.overs} Ov)</p>}
+                        </div>
+                        <span className="text-sm font-medium text-muted-foreground">VS</span>
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">{team2Name}</p>
+                          <p className={`text-2xl font-bold tabular-nums ${innings1 && innings2 && innings2.total.runs >= innings1.total.runs ? 'text-primary' : ''}`}>
+                            {innings2 ? `${innings2.total.runs}/${innings2.total.wickets}` : "—"}
+                          </p>
+                          {innings2 && <p className="text-xs text-muted-foreground">({innings2.total.overs} Ov)</p>}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                  {/* Innings toggle tabs */}
-                  <div className="sc-team-tabs">
-                    {innings1 && (
-                      <button
-                        type="button"
-                        className={`sc-team-tab${scInningsIdx === 0 ? " sc-team-tab--on" : ""}`}
-                        onClick={() => setScInningsIdx(0)}
-                      >
-                        {team1Name}
-                      </button>
-                    )}
-                    {innings2 && (
-                      <button
-                        type="button"
-                        className={`sc-team-tab${scInningsIdx === 1 ? " sc-team-tab--on" : ""}`}
-                        onClick={() => setScInningsIdx(1)}
-                      >
-                        {team2Name}
-                      </button>
-                    )}
-                  </div>
-
-                  {activeInnings && (
-                    <ScorecardView
-                      innings={activeInnings}
-                      teamName={activeTeamName}
+                  {/* Both innings stacked */}
+                  {innings1 && (
+                    <InningsSection
+                      innings={innings1}
+                      teamName={team1Name}
+                      label="1st Innings"
+                      defaultOpen
                     />
                   )}
-                </>
-              )}
-            </section>
-          )}
-
-          {/* ══════ LEADERBOARD TAB ══════ */}
-          {tab === "leaderboard" && (
-            <section
-              className="detail-panel"
-              role="tabpanel"
-              aria-label="Leaderboard"
-            >
-              <h2 className="sr-only">Leaderboard</h2>
-              {lbLoading && <p className="muted">Loading leaderboard…</p>}
-              {lbError && (
-                <div className="alert alert-error" role="alert">
-                  {lbError}
+                  {innings2 && (
+                    <InningsSection
+                      innings={innings2}
+                      teamName={team2Name}
+                      label="2nd Innings"
+                      defaultOpen
+                    />
+                  )}
                 </div>
+              )}
+            </TabsContent>
+
+            {/* Leaderboard */}
+            <TabsContent value="leaderboard">
+              {lbLoading && (
+                <div className="space-y-2">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <Skeleton key={i} className="h-12 w-full rounded-lg" />
+                  ))}
+                </div>
+              )}
+              {lbError && (
+                <Card className="border-destructive/50">
+                  <CardContent className="flex items-center gap-3 pt-6 text-destructive">
+                    <AlertCircle className="h-5 w-5" />
+                    {lbError}
+                  </CardContent>
+                </Card>
               )}
               {!lbLoading && !lbError && (
-                <div className="match-lb-panel">
-                  <div className="lb-toolbar">
-                    <input
-                      type="search"
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      className="lb-search"
-                      placeholder="Search by name or dream id"
-                    />
-                    <label className="lb-pagesize">
-                      Rows
-                      <select
-                        value={pageSize}
-                        onChange={(e) => setPageSize(Number(e.target.value))}
-                      >
-                        <option value={5}>5</option>
-                        <option value={10}>10</option>
-                        <option value={20}>20</option>
-                      </select>
-                    </label>
+                <div className="space-y-4">
+                  {/* Toolbar */}
+                  <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+                    <div className="relative w-full sm:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        type="search"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search by name..."
+                        className="pl-9"
+                      />
+                    </div>
+                    <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                      <SelectTrigger className="w-[110px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="5">5 rows</SelectItem>
+                        <SelectItem value="10">10 rows</SelectItem>
+                        <SelectItem value="20">20 rows</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <table className="leaderboard-table match-lb-table">
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Pic</th>
-                        <th>
-                          <button
-                            className="lb-sort"
-                            type="button"
-                            onClick={() => onSort("name")}
-                          >
-                            Name {sortArrow("name")}
-                          </button>
-                        </th>
-                        <th>
-                          <button
-                            className="lb-sort"
-                            type="button"
-                            onClick={() => onSort("totalpoints")}
-                          >
-                            Points {sortArrow("totalpoints")}
-                          </button>
-                        </th>
-                        <th>Preview</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pageRows.map((row, i) => {
-                        const avatarUrl = base64ToBlobUrl(row.imageurl);
-                        return (
-                          <tr
-                            key={`${row.email}-${start + i}`}
-                            className="lb-row"
-                            onClick={() => {
-                              if (
-                                match.state !== "Upcoming" ||
-                                (match.state === "Upcoming" &&
-                                  row.did === myDreamId)
-                              ) {
-                                setPreviewDid(row.did);
-                              }
-                            }}
-                          >
-                            <td>{start + i + 1}</td>
-                            <td>
-                              {avatarUrl ? (
-                                <img
-                                  src={avatarUrl}
-                                  alt=""
-                                  className="lb-avatar"
-                                />
-                              ) : (
-                                <div className="lb-avatar lb-avatar--fallback">
-                                  {row.name?.charAt(0)?.toUpperCase() ?? "?"}
-                                </div>
-                              )}
-                            </td>
-                            <td>{row.name}</td>
-                            <td>{row.totalpoints.toFixed(1)}</td>
-                            <td>
-                              {(match.state !== "Upcoming" ||
-                                (match.state === "Upcoming" &&
-                                  row.did === myDreamId)) && (
-                                <button
-                                  type="button"
-                                  className="btn btn-small btn-ghost"
-                                  disabled={row.did == null}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (row.did != null) setPreviewDid(row.did);
-                                  }}
-                                  title={
-                                    row.did == null
-                                      ? "No dream id for preview"
-                                      : "Open team preview"
-                                  }
-                                >
-                                  Preview
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {pageRows.length === 0 && (
-                        <tr>
-                          <td colSpan={5} className="leaderboard-empty muted">
-                            No leaderboard entries found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                  <div className="lb-pagination">
-                    <span className="muted small">
-                      Showing {pageRows.length === 0 ? 0 : start + 1}-
-                      {Math.min(
-                        start + pageRows.length,
-                        filteredSortedLbRows.length,
-                      )}{" "}
-                      of {filteredSortedLbRows.length}
-                    </span>
-                    <div className="lb-pagination__actions">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-small"
-                        onClick={() => setPage(1)}
-                        disabled={page <= 1}
-                      >
-                        First
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-small"
-                        onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        disabled={page <= 1}
-                      >
-                        Prev
-                      </button>
-                      <span className="small muted">
-                        Page {page} / {totalPages}
+
+                  {/* Header */}
+                  <div className="grid grid-cols-[36px_1fr_auto_40px] sm:grid-cols-[36px_40px_1fr_auto_48px] gap-2 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                    <span>#</span>
+                    <span className="hidden sm:block"></span>
+                    <span>Player</span>
+                    <span className="text-right">Points</span>
+                    <span></span>
+                  </div>
+
+                  {/* Rows */}
+                  <div className="space-y-1">
+                    {pageRows.map((row, i) => {
+                      const rank = start + i + 1;
+                      const avatarUrl = base64ToBlobUrl(row.imageurl);
+                      const canPreview = match.state !== "Upcoming" || (match.state === "Upcoming" && row.did === myDreamId);
+                      const isTop3 = rank <= 3;
+                      return (
+                        <div
+                          key={`${row.email}-${rank}`}
+                          className={`grid grid-cols-[36px_1fr_auto_40px] sm:grid-cols-[36px_40px_1fr_auto_48px] gap-2 items-center px-3 py-2.5 rounded-lg transition-colors ${
+                            isTop3 ? 'bg-primary/5 border border-primary/10' : 'bg-muted/30 hover:bg-muted/50'
+                          } ${canPreview ? 'cursor-pointer' : ''}`}
+                          onClick={() => { if (canPreview) setPreviewDid(row.did); }}
+                        >
+                          {/* Rank */}
+                          <span className={`text-sm tabular-nums font-semibold ${
+                            rank === 1 ? 'text-gold' : rank === 2 ? 'text-silver' : rank === 3 ? 'text-bronze' : 'text-muted-foreground'
+                          }`}>
+                            {rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : rank}
+                          </span>
+
+                          {/* Avatar - hidden on mobile */}
+                          <div className="hidden sm:block">
+                            <Avatar className="h-8 w-8">
+                              {avatarUrl && <AvatarImage src={avatarUrl} />}
+                              <AvatarFallback className="text-xs">{row.name?.charAt(0)?.toUpperCase() ?? "?"}</AvatarFallback>
+                            </Avatar>
+                          </div>
+
+                          {/* Name */}
+                          <span className="text-sm font-medium truncate">{row.name}</span>
+
+                          {/* Points */}
+                          <span className={`text-right tabular-nums ${isTop3 ? 'text-sm font-bold text-primary' : 'text-sm font-semibold'}`}>
+                            {row.totalpoints.toFixed(1)}
+                          </span>
+
+                          {/* Preview */}
+                          <div className="flex justify-center">
+                            {canPreview && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                disabled={row.did == null}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (row.did != null) setPreviewDid(row.did);
+                                }}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {pageRows.length === 0 && (
+                      <div className="py-12 text-center text-muted-foreground">
+                        No leaderboard entries found
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Pagination */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {pageRows.length === 0 ? 0 : start + 1}–{Math.min(start + pageRows.length, filteredSortedLbRows.length)} of {filteredSortedLbRows.length}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(1)} disabled={safePage <= 1}>
+                        <ChevronsLeft className="h-4 w-4" />
+                      </Button>
+                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={safePage <= 1}>
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm px-3">
+                        {safePage} / {totalPages}
                       </span>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-small"
-                        onClick={() =>
-                          setPage((p) => Math.min(totalPages, p + 1))
-                        }
-                        disabled={page >= totalPages}
-                      >
-                        Next
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-small"
-                        onClick={() => setPage(totalPages)}
-                        disabled={page >= totalPages}
-                      >
-                        Last
-                      </button>
+                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setPage(totalPages)} disabled={safePage >= totalPages}>
+                        <ChevronsRight className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                  <p className="muted small match-lb-hint">
-                    Click Preview to open your existing team preview.
-                  </p>
                 </div>
               )}
-            </section>
-          )}
+            </TabsContent>
+          </Tabs>
         </>
       )}
     </div>
