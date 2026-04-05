@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { ApiMatch, ScorecardInnings } from "../types/api";
 import TeamPreview from "./TeamPreview";
@@ -336,6 +336,56 @@ export function MatchDetail() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  // Mobile bottom-sheet detection
+  const isMobile = useSyncExternalStore(
+    (cb) => { const mql = window.matchMedia("(max-width: 639px)"); mql.addEventListener("change", cb); return () => mql.removeEventListener("change", cb); },
+    () => window.matchMedia("(max-width: 639px)").matches,
+    () => false,
+  );
+
+  // Bottom-sheet drag-to-dismiss state (mobile only)
+  const [dragY, setDragY] = useState(0);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [sheetEntered, setSheetEntered] = useState(false);
+  const dragStartY = useRef(0);
+  const isDragging = useRef(false);
+  const sheetScrollRef = useRef<HTMLDivElement>(null);
+
+  const isSheetOpen = previewDid != null;
+
+  useEffect(() => {
+    if (isSheetOpen && isMobile) {
+      setSheetVisible(true);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setSheetEntered(true));
+      });
+    } else if (sheetVisible) {
+      setSheetEntered(false);
+      const timer = setTimeout(() => setSheetVisible(false), 420);
+      return () => clearTimeout(timer);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSheetOpen, isMobile]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (sheetScrollRef.current && sheetScrollRef.current.scrollTop > 0) return;
+    dragStartY.current = e.touches[0].clientY;
+    isDragging.current = true;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging.current) return;
+    const delta = e.touches[0].clientY - dragStartY.current;
+    if (delta > 0) setDragY(delta);
+  };
+
+  const handleTouchEnd = () => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    if (dragY > 120) setPreviewDid(null);
+    setDragY(0);
+  };
+
   // ── Queries ──
   const { data: allMatches = [], isLoading: loading, error: matchesError } = useMatches();
   const { data: matchData } = useMatch(matchId);
@@ -470,15 +520,53 @@ export function MatchDetail() {
         </div>
       )}
 
-      {/* Team preview sheet */}
-      <Sheet open={previewDid != null} onOpenChange={(open) => { if (!open) setPreviewDid(null) }}>
-        <SheetContent side="right" className="p-0 flex flex-col overflow-hidden sm:max-w-md">
-          <SheetTitle className="sr-only">Squad Preview</SheetTitle>
-          {previewDid != null && (
-            <TeamPreview matchId={matchId} dreamId={previewDid} />
-          )}
-        </SheetContent>
-      </Sheet>
+      {/* Team preview — desktop: Radix sheet, mobile: custom bottom-sheet */}
+      {!isMobile && (
+        <Sheet open={previewDid != null} onOpenChange={(open) => { if (!open) setPreviewDid(null) }}>
+          <SheetContent side="right" className="p-0 flex flex-col overflow-hidden sm:max-w-md">
+            <SheetTitle className="sr-only">Squad Preview</SheetTitle>
+            {previewDid != null && (
+              <TeamPreview matchId={matchId} dreamId={previewDid} />
+            )}
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {isMobile && sheetVisible && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-50 bg-black/50"
+            style={{ opacity: sheetEntered ? 1 : 0, transition: "opacity 300ms ease" }}
+            onClick={() => setPreviewDid(null)}
+          />
+
+          {/* Bottom sheet */}
+          <div
+            className="fixed inset-x-0 bottom-0 z-50 flex flex-col max-h-[92vh] rounded-t-3xl overflow-hidden bg-background"
+            style={{
+              boxShadow: "0 -6px 20px rgba(255, 255, 255, 0.08), 0 -1px 6px rgba(255, 255, 255, 0.05)",
+              transform: `translateY(${!sheetEntered ? "100%" : dragY > 0 ? `${dragY}px` : "0"})`,
+              transition: dragY > 0 ? "none" : "transform 400ms cubic-bezier(0.32, 0.72, 0, 1)",
+            }}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            {/* Drag handle */}
+            <div className="absolute top-0 inset-x-0 z-20 flex justify-center py-3 rounded-t-3xl backdrop-blur-md pointer-events-none">
+              <div className="w-10 h-1 rounded-full bg-muted-foreground/40" />
+            </div>
+
+            {/* Scrollable content */}
+            <div ref={sheetScrollRef} className="overflow-y-auto flex-1 min-h-0 pt-2">
+              {previewDid != null && (
+                <TeamPreview matchId={matchId} dreamId={previewDid} />
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
 
       {!loading && match && (

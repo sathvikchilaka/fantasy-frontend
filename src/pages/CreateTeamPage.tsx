@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { CreateTeam } from './CreateTeam'
+import { CreateTeamWizard as CreateTeam } from '@/features/createTeam/CreateTeamWizard'
 
 export function CreateTeamPage() {
   const { matchId: matchIdParam, action } = useParams<{ matchId: string; action: string }>()

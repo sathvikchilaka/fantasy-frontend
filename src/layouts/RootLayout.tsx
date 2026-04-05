@@ -121,19 +121,13 @@ export function RootLayout() {
                 <DropdownMenuSeparator />
 
                 {token ? (
-                  <DropdownMenuItem
-                    onClick={signOut}
-                    className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                  >
-                    <LogOut className="h-4 w-4" />
+                  <DropdownMenuItem onClick={signOut}>
+                    <LogOut className="h-4 w-4 text-muted-foreground" />
                     <span>Sign out</span>
                   </DropdownMenuItem>
                 ) : (
                   <DropdownMenuItem asChild>
-                    <a href={OAUTH_GOOGLE_URL} className="flex items-center gap-2.5 w-full">
-                      <Swords className="h-4 w-4 text-muted-foreground" />
-                      Sign in with Google
-                    </a>
+                    <a href={OAUTH_GOOGLE_URL}>Sign in with Google</a>
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>

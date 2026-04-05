@@ -45,35 +45,33 @@ function MatchStatsPopover({ stats }: { stats: OverallLeaderboardStat[] }) {
   return (
     <div className="p-4 bg-muted/50">
       <p className="text-[11px] font-semibold text-muted-foreground mb-2 px-1">Match-by-match breakdown</p>
-      <div className="grid grid-cols-3 text-xs font-medium text-muted-foreground mb-2 px-1">
+      <div className="grid grid-cols-[1fr_auto_auto] text-xs font-medium text-muted-foreground mb-2 px-1 gap-x-3">
         <span>Fixture</span>
         <span className="text-center">Finish</span>
-        <span className="text-right">Pts earned</span>
+        <span className="text-right">Pts</span>
       </div>
       <div className="space-y-2">
         {sorted.map((s) => (
-          <div key={s.matchid} className="grid grid-cols-3 items-center text-sm bg-background rounded-md p-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <div className="flex items-center gap-1 truncate">
-                <img
-                  src={playerImageUrl(s.t1.imageId!)}
-                  alt=""
-                  className="h-4 w-4 rounded-full"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                />
-                <span className="text-xs truncate">{s.t1.teamSName}</span>
-                <span className="text-xs text-muted-foreground">vs</span>
-                <img
-                  src={playerImageUrl(s.t2.imageId!)}
-                  alt=""
-                  className="h-4 w-4 rounded-full"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                />
-                <span className="text-xs truncate">{s.t2.teamSName}</span>
-              </div>
+          <div key={s.matchid} className="grid grid-cols-[1fr_auto_auto] items-center text-sm bg-background rounded-md p-2 gap-x-3">
+            <div className="flex items-center gap-1 min-w-0 overflow-hidden">
+              <img
+                src={playerImageUrl(s.t1.imageId!)}
+                alt=""
+                className="h-4 w-4 rounded-full shrink-0"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+              <span className="text-xs truncate">{s.t1.teamSName}</span>
+              <span className="text-xs text-muted-foreground shrink-0">v</span>
+              <img
+                src={playerImageUrl(s.t2.imageId!)}
+                alt=""
+                className="h-4 w-4 rounded-full shrink-0"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+              <span className="text-xs truncate">{s.t2.teamSName}</span>
             </div>
-            <span className="text-center text-xs">#{s.position}</span>
-            <span className="text-right text-xs font-semibold tabular-nums">{s.points.toFixed(1)}</span>
+            <span className="text-center text-xs shrink-0">#{s.position}</span>
+            <span className="text-right text-xs font-semibold tabular-nums shrink-0">{s.points.toFixed(1)}</span>
           </div>
         ))}
       </div>
@@ -174,7 +172,7 @@ export function Leaderboard() {
   }, [rows])
 
   return (
-    <div className="container py-8">
+    <div className="container px-4 sm:px-8 py-6 sm:py-8">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight">Season Leaderboard</h1>
@@ -184,7 +182,7 @@ export function Leaderboard() {
       {loading && (
         <div className="space-y-6">
           {/* Podium skeleton */}
-          <div className="grid grid-cols-3 gap-3 max-w-2xl mx-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl mx-auto">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="rounded-xl border bg-card p-6 flex flex-col items-center gap-3">
                 <Skeleton className="h-6 w-6 rounded-full" />
@@ -195,7 +193,7 @@ export function Leaderboard() {
             ))}
           </div>
           {/* Stats skeleton */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="rounded-xl border bg-card p-4 flex items-center gap-3">
                 <Skeleton className="h-9 w-9 rounded-lg" />
@@ -236,13 +234,13 @@ export function Leaderboard() {
         <>
           {/* Podium */}
           {topThree.length >= 3 && (
-            <div className="grid grid-cols-3 gap-3 mb-8 max-w-2xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8 max-w-2xl mx-auto">
               {[topThree[1], topThree[0], topThree[2]].map((entry, vi) => {
                 const actualRank = vi === 0 ? 2 : vi === 1 ? 1 : 3
                 const avatarUrl = base64ToBlobUrl(entry.imageurl)
                 const ringColor = actualRank === 1 ? 'ring-gold' : actualRank === 2 ? 'ring-silver' : 'ring-bronze'
                 return (
-                  <Card key={entry.email} className={`text-center ${actualRank === 1 ? 'md:-mt-4 border-gold/30' : actualRank === 3 ? 'md:mt-4' : ''}`}>
+                  <Card key={entry.email} className={`text-center ${actualRank === 1 ? 'sm:-mt-4 border-gold/30' : actualRank === 3 ? 'sm:mt-4' : ''}`}>
                     <CardContent className="pt-6 pb-4">
                       <div className="text-2xl mb-2">
                         {actualRank === 1 ? '🥇' : actualRank === 2 ? '🥈' : '🥉'}
@@ -266,7 +264,7 @@ export function Leaderboard() {
           )}
 
           {/* Summary stats */}
-          <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
             {[
               { label: 'Total players', value: rows.length, icon: Users },
               { label: 'Season high', value: Math.max(...rows.map((r) => r.totalpoints)).toFixed(1), icon: TrendingUp },
