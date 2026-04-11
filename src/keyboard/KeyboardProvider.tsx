@@ -138,16 +138,6 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      // / or f — focus search input
-      if ((e.key === '/' || e.key === 'f') && !off('focus-search')) {
-        const search = document.querySelector<HTMLInputElement>('[data-search]')
-        if (search) {
-          e.preventDefault()
-          search.focus()
-          search.select()
-        }
-        return
-      }
 
       // Backspace — go back
       if (e.key === 'Backspace' && !meta && !e.shiftKey && !e.repeat && !off('go-back')) {

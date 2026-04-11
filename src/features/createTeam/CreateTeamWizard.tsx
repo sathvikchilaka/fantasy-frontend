@@ -531,12 +531,12 @@ function DesktopCreateTeam({
             <p className="text-lg font-semibold truncate">{action === 'edit' ? 'Edit' : 'Build'} your squad</p>
             <p className="text-[11px] text-muted-foreground truncate">{t1} vs {t2}</p>
           </div>
-          <Button variant="outline" disabled={smartXILoading} onClick={onSmartXI} title="Auto-pick a balanced XI based on player credits, role balance, and team diversity" className="gap-1.5 shrink-0">
+          <Button variant="outline" disabled={smartXILoading} onClick={onSmartXI} title="Auto-pick a balanced XI based on player credits, role balance, and team diversity" className="gap-1.5 shrink-0" data-tour="createteam-smart-xi">
             <Sparkles className="h-4 w-4" />
             {smartXILoading ? 'Picking…' : 'Smart XI'}
             <Kbd>S</Kbd>
           </Button>
-          <Button disabled={!canSave || saving || success} onClick={() => smartXIPicked ? setConfirmOpen(true) : onSubmit()} className="gap-2 shrink-0">
+          <Button disabled={!canSave || saving || success} onClick={() => smartXIPicked ? setConfirmOpen(true) : onSubmit()} className="gap-2 shrink-0" data-tour="createteam-save">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : success ? <Check className="h-4 w-4" /> : smartXIPicked ? <Sparkles className="h-4 w-4" /> : null}
             {saving ? 'Saving' : success ? 'Saved!' : smartXIPicked ? 'Save Smart XI' : 'Save squad'}
             <Kbd>↵</Kbd>

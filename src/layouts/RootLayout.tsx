@@ -18,13 +18,17 @@ import {
   Menu,
   Home,
   User,
+  Sparkles,
 } from 'lucide-react'
 import { CommandMenu } from '@/keyboard/CommandMenu'
 import { ShortcutsHelpModal } from '@/keyboard/ShortcutsHelpModal'
+import { WhatsNewModal } from '@/tours/WhatsNewModal'
+import { useTour } from '@/tours/useTour'
 
 export function RootLayout() {
   const [token, settoken1] = useState<string | null>(useAuthToken())
   const navigate = useNavigate()
+  const { unseenCount, setWhatsNewOpen } = useTour()
 
   const navItems = [
     { to: '/', label: 'Home', icon: Home, end: true, always: true },
@@ -51,6 +55,7 @@ export function RootLayout() {
           <NavLink
             to="/"
             end
+            data-tour="brand-logo"
             className="flex items-center gap-2 font-bold text-lg tracking-tight text-foreground hover:no-underline"
           >
             <div className="h-8 w-8 rounded-lg bg-primary-foreground flex items-center justify-center">
@@ -60,7 +65,7 @@ export function RootLayout() {
           </NavLink>
 
           {/* Desktop nav — hidden on mobile */}
-          <nav className="hidden md:flex items-center gap-1" aria-label="Main">
+          <nav className="hidden md:flex items-center gap-1" aria-label="Main" data-tour="nav-bar">
             {navItems
               .filter((item) => item.always || token !== null)
               .map((item) => (
@@ -84,6 +89,21 @@ export function RootLayout() {
 
           {/* Desktop auth — hidden on mobile */}
           <div className="hidden md:flex items-center gap-2">
+            {token && unseenCount > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                data-tour="whats-new-btn"
+                onClick={() => setWhatsNewOpen(true)}
+                className="relative"
+                aria-label="What's new"
+              >
+                <Sparkles className="h-4 w-4" />
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-gold text-[9px] font-bold text-background">
+                  {unseenCount}
+                </span>
+              </Button>
+            )}
             {token ? (
               <Button variant="ghost" size="sm" onClick={signOut} className="gap-2">
                 <LogOut className="h-4 w-4" />
@@ -169,6 +189,7 @@ export function RootLayout() {
       {/* Keyboard UI — portals to body */}
       <CommandMenu />
       <ShortcutsHelpModal />
+      <WhatsNewModal />
     </div>
   )
 }

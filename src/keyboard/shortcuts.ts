@@ -18,7 +18,6 @@ export const ALL_SHORTCUTS: ShortcutDef[] = [
   // Global
   { id: 'help', keys: ['?'], label: 'Keyboard shortcuts', description: 'Shows this keyboard shortcuts reference modal.', group: 'Global' },
   { id: 'esc', keys: ['Esc'], label: 'Close modal / drawer', description: 'Closes any open modal, drawer, or sheet overlay.', group: 'Global' },
-  { id: 'focus-search', keys: ['/', 'f'], label: 'Focus search', description: 'Jumps the cursor into the search input on the current page.', group: 'Global' },
   { id: 'go-back', keys: ['Backspace'], label: 'Go back', description: 'Navigates to the previous page, like the browser back button.', group: 'Global' },
 
   // Navigation

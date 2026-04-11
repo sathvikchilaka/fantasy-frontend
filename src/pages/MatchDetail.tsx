@@ -686,7 +686,7 @@ export function MatchDetail() {
             </SheetTitle>
             {/* Tab toggle — only when viewing someone else's team */}
             {canShowCompare && (
-              <div className="relative flex backdrop-blur-md bg-white/10 border border-white/15 rounded-full p-0.5 mx-4 mt-14 shrink-0">
+              <div data-tour="matchdetail-compare-toggle" className="relative flex backdrop-blur-md bg-white/10 border border-white/15 rounded-full p-0.5 mx-4 mt-14 shrink-0">
                 <div
                   className="absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-full bg-primary shadow-sm transition-transform duration-300 ease-out"
                   style={{ transform: sheetTab === "compare" ? "translateX(calc(100% + 4px))" : "translateX(0)" }}
@@ -852,11 +852,11 @@ export function MatchDetail() {
             setPage(1);
             setQuery("");
             tabsRef.current?.scrollIntoView({ behavior: "instant", block: "start" });
-          }}>
+          }} data-tour="matchdetail-tabs">
             <TabsList className="mb-4">
               <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
-              <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
-              <TabsTrigger value="playerstats">Player Stats</TabsTrigger>
+              <TabsTrigger value="leaderboard" data-tour="matchdetail-leaderboard-tab">Leaderboard</TabsTrigger>
+              <TabsTrigger value="playerstats" data-tour="matchdetail-playerstats-tab">Player Stats</TabsTrigger>
             </TabsList>
 
             {/* Scorecard */}

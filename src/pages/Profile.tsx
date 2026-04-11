@@ -196,7 +196,7 @@ export function Profile() {
 
       {/* Profile header — avatar + identity */}
       <div className="flex flex-col items-center mb-8">
-        <div className="relative group mb-4">
+        <div className="relative group mb-4" data-tour="profile-avatar">
           <Avatar className="h-28 w-28 border-4 border-background shadow-lg">
             {savedProfileUrl && <AvatarImage src={savedProfileUrl} />}
             <AvatarFallback>
@@ -256,7 +256,7 @@ export function Profile() {
       )}
 
       {/* Game name card */}
-      <Card>
+      <Card data-tour="profile-game-name">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Pencil className="h-4 w-4 text-muted-foreground" />
@@ -287,7 +287,7 @@ export function Profile() {
       </Card>
 
       {/* Preferences */}
-      <Card className="mt-4">
+      <Card className="mt-4" data-tour="profile-preferences">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <FlaskConical className="h-4 w-4 text-muted-foreground" />
@@ -331,6 +331,7 @@ export function Profile() {
             </div>
             <Switch
               id="autoteam"
+              data-tour="profile-autoteam-switch"
               checked={user?.autoteam ?? true}
               disabled={autoTeamMutation.isPending}
               onCheckedChange={(checked) => {

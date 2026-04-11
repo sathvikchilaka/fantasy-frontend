@@ -1029,7 +1029,7 @@ export default function PlayerStatsTab({
         </div>
 
         {/* Filter chips */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-1.5" data-tour="playerstats-filters">
           {/* Role filters */}
           {(Object.keys(ROLE_LABELS) as RoleFilter[]).map((role) => (
             <Button

@@ -181,6 +181,73 @@
   }
 }
 
+/* ── driver.js tour overrides (dark theme) ── */
+.driver-popover {
+  background-color: oklch(0.10 0 0) !important;
+  border: 1px solid oklch(0.22 0 0) !important;
+  border-radius: 0.75rem !important;
+  color: oklch(0.985 0 0) !important;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.5) !important;
+  max-width: 320px !important;
+}
+.driver-popover .driver-popover-title {
+  font-family: var(--font-sans) !important;
+  font-size: 0.875rem !important;
+  font-weight: 600 !important;
+  color: oklch(0.985 0 0) !important;
+}
+.driver-popover .driver-popover-description {
+  font-family: var(--font-sans) !important;
+  font-size: 0.8125rem !important;
+  color: oklch(0.556 0 0) !important;
+  line-height: 1.5 !important;
+}
+.driver-popover .driver-popover-progress-text {
+  font-family: var(--font-sans) !important;
+  font-size: 0.6875rem !important;
+  color: oklch(0.40 0 0) !important;
+}
+.driver-popover .driver-popover-navigation-btns {
+  gap: 0.375rem !important;
+}
+.driver-popover .driver-popover-prev-btn,
+.driver-popover .driver-popover-next-btn {
+  font-family: var(--font-sans) !important;
+  font-size: 0.8125rem !important;
+  font-weight: 500 !important;
+  border-radius: 0.375rem !important;
+  padding: 0.375rem 0.75rem !important;
+  text-shadow: none !important;
+}
+.driver-popover .driver-popover-prev-btn {
+  background-color: oklch(0.18 0 0) !important;
+  color: oklch(0.985 0 0) !important;
+  border: 1px solid oklch(0.22 0 0) !important;
+}
+.driver-popover .driver-popover-prev-btn:hover {
+  background-color: oklch(0.22 0 0) !important;
+}
+.driver-popover .driver-popover-next-btn {
+  background-color: oklch(0.985 0 0) !important;
+  color: oklch(0.07 0 0) !important;
+  border: none !important;
+}
+.driver-popover .driver-popover-next-btn:hover {
+  background-color: oklch(0.90 0 0) !important;
+}
+.driver-popover .driver-popover-close-btn {
+  color: oklch(0.556 0 0) !important;
+}
+.driver-popover .driver-popover-close-btn:hover {
+  color: oklch(0.985 0 0) !important;
+}
+.driver-popover .driver-popover-arrow-side-left.driver-popover-arrow,
+.driver-popover .driver-popover-arrow-side-right.driver-popover-arrow,
+.driver-popover .driver-popover-arrow-side-top.driver-popover-arrow,
+.driver-popover .driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-color: oklch(0.22 0 0) !important;
+}
+
 /* ── cmdk command menu ── */
 [cmdk-root] {
   font-family: var(--font-sans);
